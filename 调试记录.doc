@@ -1,0 +1,178 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<title>BlockStyler1 调试记录</title>
+<style>
+body { font-family: "微软雅黑", SimSun, sans-serif; font-size: 14px; line-height: 1.8; margin: 40px; color: #333; }
+h1 { font-size: 22px; text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+h2 { font-size: 18px; margin-top: 30px; border-bottom: 1px solid #999; padding-bottom: 5px; }
+h3 { font-size: 15px; margin-top: 20px; color: #555; }
+p { margin: 8px 0; }
+table { border-collapse: collapse; margin: 12px 0; width: 100%; }
+th, td { border: 1px solid #999; padding: 6px 10px; text-align: left; }
+th { background: #eee; font-weight: bold; }
+code { font-family: Consolas, "Courier New", monospace; background: #f5f5f5; padding: 1px 4px; font-size: 13px; }
+pre { background: #f8f8f8; border: 1px solid #ddd; padding: 10px; font-size: 13px; overflow-x: auto; }
+strong { color: #c00; }
+</style>
+</head>
+<body>
+
+<h1>BlockStyler1 调试记录</h1>
+
+<h2>项目概述</h2>
+<table>
+<tr><td><strong>项目名称</strong></td><td>以点选择移动和复制</td></tr>
+<tr><td><strong>类型</strong></td><td>Siemens NX 2306 Block UI Styler C++ 插件</td></tr>
+<tr><td><strong>开发环境</strong></td><td>Visual Studio 2022 Professional + NX 2306 Open API</td></tr>
+<tr><td><strong>编译目标</strong></td><td>Debug x64 DLL</td></tr>
+</table>
+
+<h2>调试问题列表</h2>
+
+<h3>1. 编译错误：文件编码问题（C4819 / C2001）</h3>
+
+<p><strong>现象：</strong></p>
+<pre>warning C4819: 该文件包含不能在当前代码页(936)中表示的字符
+error C2001: 常量中有换行符
+error C2065: "moveMode": 未声明的标识符</pre>
+
+<p><strong>原因：</strong></p>
+<p>cpp 和 hpp 文件以 UTF-8 without BOM 编码写入，MSVC 在 GBK（代码页 936）环境下将中文字符串（"边线"、"体中心"、"面中心" 等）错误解释为多字节序列，导致字符串常量断裂。hpp 解析失败进一步导致 <code>moveMode</code>、<code>endPt</code> 等成员变量未被识别。</p>
+
+<p><strong>修复：</strong></p>
+<ol>
+<li>两个文件用 UTF-8 with BOM（头三个字节 EF BB BF）重写</li>
+<li>在 cpp 和 hpp 中添加编译指令：</li>
+</ol>
+<pre>#ifdef _MSC_VER
+#pragma execution_character_set("utf-8")
+#endif</pre>
+
+<h3>2. 编译错误：API 签名不匹配（C2660）</h3>
+
+<p><strong>现象：</strong></p>
+<pre>error C2660: "UF_MODL_ask_edge_verts": 函数不接受 3 个参数
+error C2660: "UF_MODL_ask_face_props": 函数不接受 7 个参数</pre>
+
+<p><strong>原因：</strong></p>
+<p>NX 2306 的 UF_MODL API 签名与最初使用的版本不同：</p>
+<table>
+<tr><th>函数</th><th>错误调用</th><th>正确签名</th></tr>
+<tr><td><code>UF_MODL_ask_edge_verts</code></td><td><code>(tag, double[6], int*)</code></td><td><code>(tag, point1[3], point2[3], vertex_count*)</code></td></tr>
+<tr><td><code>UF_MODL_ask_face_props</code></td><td><code>(tag, uv, pt, u1, v1, norm, radii)</code></td><td><code>(tag, uv, pt, u1, v1, u2, v2, norm, radii)</code></td></tr>
+</table>
+
+<p><strong>修复：</strong></p>
+<ul>
+<li>将 <code>double verts[6]</code> 拆为 <code>double point1[3]</code> 和 <code>double point2[3]</code></li>
+<li>补充缺失的二阶导数参数 <code>double u2[3]</code> 和 <code>double v2[3]</code></li>
+</ul>
+
+<h3>3. 功能缺陷：实体未完成移动/复制</h3>
+
+<p><strong>现象：</strong></p>
+<p>点击确定后，选中的实体没有发生任何位移。</p>
+
+<p><strong>原因：</strong></p>
+<p><code>apply_cb</code> 将 <code>selection0</code> 中所有选中对象（可能包含 Face 和 Edge）的 tag 直接传给 <code>UF_MODL_transform_entities</code>。当用户选择的是面或边时，变换仅作用于面/边本身而非所属实体，视觉上毫无效果。</p>
+
+<p><strong>修复：</strong></p>
+<p>在 <code>apply_cb</code> 中先通过 <code>GetSelectedBodies()</code> 提取选中对象中的 Body entity tags，再对这些 Body 执行变换。如果没有选中任何 Body，弹出警告提示"没有选中实体，请选择实体"。</p>
+<pre>std::vector&lt;tag_t&gt; bodyTags;
+GetSelectedBodies(bodyTags);
+if (bodyTags.empty()) {
+    // 弹出警告
+    return 1;
+}
+UF_MODL_transform_entities((int)bodyTags.size(), bodyTags.data(), matrix);</pre>
+
+<h3>4. 功能缺陷：起始点和结束点计算相同导致无位移</h3>
+
+<p><strong>现象：</strong></p>
+<p>点击确定后弹出提示 "Start and end are same"。</p>
+
+<p><strong>原因：</strong></p>
+<p><code>CalculatePointByType</code> 中无论处理 <code>enum0</code>（起始点）还是 <code>enum01</code>（结束点），都通过 <code>GetSelectedBodies()</code> / <code>GetSelectedFaces()</code> 从 <code>selection0</code> 读取同一个选中对象的数据来计算坐标。例如起始点选了"体中心"、结束点也选了"体中心"，两次计算都取了同一批 bodies，结果坐标相同，位移向量为 (0,0,0)。</p>
+
+<p><strong>修复：</strong></p>
+<ol>
+<li><code>CalculatePointByType</code> 中 <code>enum01</code> 的 case 1（体中心）和 case 2（面中心）改为直接返回用户手动选取的 <code>pickPt</code></li>
+<li><code>UpdatePointSnapType</code> 中 <code>enum01</code> 的 case 1 改为显示 point01 控件让用户手动选点，不再隐藏和自动计算</li>
+</ol>
+
+<p><strong>修改后的结束点行为：</strong></p>
+<table>
+<tr><th>模式</th><th>point01 状态</th><th>坐标来源</th></tr>
+<tr><td>ABS原点</td><td>隐藏</td><td>(0,0,0)</td></tr>
+<tr><td>体中心</td><td>显示可点击</td><td>用户手动选取</td></tr>
+<tr><td>面中心</td><td>显示可点击</td><td>用户手动选取</td></tr>
+<tr><td>O Y0点</td><td>显示可点击</td><td>(pickPt.X, 0, pickPt.Z)</td></tr>
+<tr><td>O X0点</td><td>显示可点击</td><td>(0, pickPt.Y, pickPt.Z)</td></tr>
+<tr><td>O Z0点</td><td>显示可点击</td><td>(pickPt.X, pickPt.Y, 0)</td></tr>
+</table>
+
+<p><strong>修改后的起始点行为：</strong></p>
+<table>
+<tr><th>模式</th><th>point0 状态</th><th>坐标来源</th></tr>
+<tr><td>边线</td><td>显示可点击</td><td>用户选取，降级为边中点（selection0 中 edge）</td></tr>
+<tr><td>体中心</td><td>隐藏，自动计算</td><td>selection0 中 body 的质心</td></tr>
+<tr><td>面中心</td><td>显示可点击</td><td>用户选取，降级为面 UV 中心（selection0 中 face）</td></tr>
+</table>
+
+<h3>5. 功能迭代：起始点控件行为调整（已回退）</h3>
+
+<p><strong>变更：</strong></p>
+<p>曾将所有起始点模式改为隐藏 point0 并自动计算坐标（与体中心统一）。</p>
+
+<p><strong>回退原因：</strong></p>
+<p>用户要求"起始点的点选择基于所选实体"——边线和面中心模式下 point0 应当显示并可交互，让用户能在实体上点击选取，同时以 selection0 中选中的元素作为辅助计算源。已回退至原始显示行为。</p>
+
+<h3>6. UI 文本修正：选择对象标签</h3>
+
+<p><strong>问题：</strong></p>
+<p><code>selection0</code> 的标签显示为 <code>Select Objects (N)</code>，应为中文。</p>
+
+<p><strong>修复：</strong></p>
+<p>将 <code>UpdateSelectionCount()</code> 中：</p>
+<pre>std::string label = "Select Objects (" + std::to_string(...) + ")";</pre>
+<p>改为：</p>
+<pre>std::string label = "选择对象 (" + std::to_string(...) + ")";</pre>
+
+<h2>最终编译状态</h2>
+<pre>BlockStyler1.vcxproj -> D:\NXOPEN\_Sourse\BlockStyler1\x64\Debug\BlockStyler1.dll</pre>
+
+<p><strong>输出文件：</strong></p>
+<table>
+<tr><th>文件</th><th>路径</th></tr>
+<tr><td>DLL</td><td>D:\NXOPEN\_Sourse\BlockStyler1\x64\Debug\BlockStyler1.dll</td></tr>
+<tr><td>LIB</td><td>D:\NXOPEN\_Sourse\BlockStyler1\x64\Debug\BlockStyler1.lib</td></tr>
+<tr><td>EXP</td><td>D:\NXOPEN\_Sourse\BlockStyler1\x64\Debug\BlockStyler1.exp</td></tr>
+<tr><td>PDB</td><td>D:\NXOPEN\_Sourse\BlockStyler1\x64\Debug\BlockStyler1.pdb</td></tr>
+</table>
+
+<p><strong>剩余的 3 个 warnings：</strong></p>
+<table>
+<tr><th>编号</th><th>内容</th><th>说明</th></tr>
+<tr><td>STL4038</td><td>&lt;variant&gt; 需要 C++17</td><td>SDK 头文件内部引用，不影响</td></tr>
+<tr><td>C4275</td><td>std::exception 作为 DLL 接口基类</td><td>SDK 设计如此，不影响</td></tr>
+<tr><td>C4101</td><td>catch 块中 ex 未引用</td><td>代码风格，不影响</td></tr>
+</table>
+
+<h2>已实现功能清单</h2>
+<table>
+<tr><th>功能</th><th>状态</th></tr>
+<tr><td>选择对象（SelectObject，含计数标签）</td><td>正常</td></tr>
+<tr><td>移动/复制模式切换（button0/button01）</td><td>正常</td></tr>
+<tr><td>起始点类型（边线/体中心/面中心）+ 坐标计算</td><td>正常</td></tr>
+<tr><td>结束点类型（ABS原点/体中心/面中心/O Y0/O X0/O Z0）+ 坐标计算</td><td>正常</td></tr>
+<tr><td>GetDialog() / GetTopBlock() 方法</td><td>正常</td></tr>
+<tr><td>GetSelectedBodies/Edges/Faces 辅助函数</td><td>正常</td></tr>
+<tr><td>实体移动（apply_cb + Body tag 提取）</td><td>正常</td></tr>
+</table>
+
+<h2>已知待完善</h2>
+<p><strong>复制模式：</strong>目前复制和移动共用同一条 <code>UF_MODL_transform_entities</code> 逻辑（均为移动）。NX 2306 无 <code>UF_MODL_create_copy_body</code> API，复制功能需使用 <code>UF_MODL_copy_paste_features</code> 或 NX Open C++ 方式实现。</p>
+
+</body>
+</html>
