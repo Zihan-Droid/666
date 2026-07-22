@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Water Interference Report</title>
+<style>body{font-family:"Microsoft YaHei",sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px 10px}th{background:#f0f0f0}.error{color:#c00;font-weight:bold}.warning{color:#c80}.summary{margin-bottom:16px}</style></head>
+<body><h1>Water Interference Report</h1>
+<div class="summary"><p>Total: <b>{{ result.total }}</b> (Error {{ result.error_count }} / Warning {{ result.warning_count }})</p>
+<ul>{% for cat, n in result.by_category.items() %}<li>{{ cat.value }}: {{ n }}</li>{% endfor %}</ul></div>
+<table><thead><tr><th>Category</th><th>Severity</th><th>Water</th><th>Target</th><th>Distance</th><th>Threshold</th><th>Message</th></tr></thead>
+<tbody>{% for i in result.issues %}<tr><td>{{ i.category.value }}</td><td class="{{ i.severity.value }}">{{ i.severity.value }}</td><td>{{ i.water_body_name }}</td><td>{{ i.target_body_name }}</td><td>{{ "%.2f"|format(i.distance) }}</td><td>{{ "%.2f"|format(i.threshold) }}</td><td>{{ i.message }}</td></tr>{% endfor %}</tbody></table></body></html>

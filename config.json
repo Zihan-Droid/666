@@ -1,0 +1,29 @@
+{
+  "identification": {
+    "water_line": { "name_patterns": [], "layers": [191], "attributes": [] },
+    "cavity": { "name_patterns": [], "layers": [10], "attributes": [] },
+    "core": { "name_patterns": [], "layers": [20], "attributes": [] },
+    "ejector": { "name_patterns": [], "layers": [46], "attributes": [] },
+    "insert": { "name_patterns": [], "layers": [], "attributes": [] },
+    "fastener": { "name_patterns": [], "layers": [29, 49], "attributes": [] }
+  },
+  "thresholds": {
+    "water_water_min": 3.0,
+    "water_cavity_min": 15.0,
+    "water_core_min": 15.0,
+    "water_ejector_min": 3.0,
+    "water_insert_min": 3.0,
+    "water_fastener_min": 1.0
+  },
+  "highlight": {
+    "colors": {
+      "water_water": 1,
+      "water_cavity": 6,
+      "water_core": 6,
+      "water_ejector": 2,
+      "water_insert": 2,
+      "water_fastener": 5
+    },
+    "group_prefix": "INTERFERENCE_"
+  }
+}
